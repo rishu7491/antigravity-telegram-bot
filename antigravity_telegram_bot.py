@@ -502,8 +502,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not GEMINI_API_KEY:
         await update.message.reply_text(
-            "❌ `GEMINI_API_KEY` set nahi hai!\n"
-            "Kripya `.env` file me `GEMINI_API_KEY=your_key` dalein ya environment variable set karein."
+            f"👋 *Namaste {user.first_name}! Main Antigravity Coding Agent hoon.*\n\n"
+            f"📂 Active Workspace: `{session['workspace']}`\n\n"
+            "⚡ AI features (code generation, file editing, debugging) shuru karne ke liye ek *Gemini API Key* chahiye:\n"
+            "1. Yahan se free key generate karein: https://aistudio.google.com/\n"
+            "2. Telegram me seedha yeh command bhejiye:\n"
+            "`/set_key YOUR_GEMINI_KEY`\n\n"
+            "Key set hote hi main aapke commands aur tasks execute karna shuru kar dunga!\n"
+            "Use `/status` to check bot health.",
+            parse_mode=ParseMode.MARKDOWN
         )
         return
 
@@ -544,63 +551,62 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         agent_reply = response.text or "No response generated."
 
-        # Parse and execute agent tool calls in the reply
-        modified = False
         iteration_text = agent_reply
 
-        # 1. Check for RUN_CMD
-        if "<<<RUN_CMD:" in iteration_text:
-            cmd_start_idx = iteration_text.find("<<<RUN_CMD:") + len("<<<RUN_CMD:")
-            cmd_end_idx = iteration_text.find(">>>", cmd_start_idx)
-            if cmd_end_idx != -1:
-                cmd_to_run = iteration_text[cmd_start_idx:cmd_end_idx].strip()
-                perm_result = await request_permission(
-                    update=update,
-                    user_id=user.id,
-                    action_type="run_command",
-                    action_payload=cmd_to_run,
-                    workspace=workspace
-                )
-                iteration_text += f"\n\n*Command Execution Result:*\n```\n{perm_result[:1500]}\n```"
-                modified = True
+        # 1. Parse & Execute RUN_CMD
+        import re
+        cmd_matches = re.findall(r"<<<RUN_CMD:\s*(.*?)\s*>>>", iteration_text)
+        for cmd_to_run in cmd_matches:
+            perm_result = await request_permission(
+                update=update,
+                user_id=user.id,
+                action_type="run_command",
+                action_payload=cmd_to_run,
+                workspace=workspace
+            )
+            iteration_text += f"\n\n*Command Execution Result:*\n```\n{perm_result[:1500]}\n```"
 
-        # 2. Check for WRITE_FILE
-        if "<<<WRITE_FILE:" in iteration_text:
-            wf_start_idx = iteration_text.find("<<<WRITE_FILE:") + len("<<<WRITE_FILE:")
-            wf_header_end = iteration_text.find(">>>", wf_start_idx)
-            wf_end_idx = iteration_text.find("<<<END_WRITE>>>", wf_header_end)
+        # 2. Parse & Execute READ_FILE
+        read_matches = re.findall(r"<<<READ_FILE:\s*(.*?)\s*>>>", iteration_text)
+        for file_to_read in read_matches:
+            read_res = execute_read_file(workspace, file_to_read)
+            iteration_text += f"\n\n```\n{read_res[:1500]}\n```"
 
-            if wf_header_end != -1 and wf_end_idx != -1:
-                file_rel_path = iteration_text[wf_start_idx:wf_header_end].strip()
-                file_content = iteration_text[wf_header_end + 3:wf_end_idx].strip()
-                write_result = execute_write_file(workspace, file_rel_path, file_content)
-                iteration_text += f"\n\n*{write_result}*"
-                modified = True
+        # 3. Parse & Execute WRITE_FILE
+        write_pattern = re.compile(r"<<<WRITE_FILE:\s*(.*?)\s*>>>(.*?)<<<END_WRITE>>>", re.DOTALL)
+        for wf_match in write_pattern.finditer(iteration_text):
+            f_rel_path = wf_match.group(1).strip()
+            f_content = wf_match.group(2).strip()
+            w_res = execute_write_file(workspace, f_rel_path, f_content)
+            iteration_text += f"\n\n*{w_res}*"
 
-        # 3. Check for LIST_FILES
-        if "<<<LIST_FILES:" in iteration_text:
-            lf_start = iteration_text.find("<<<LIST_FILES:") + len("<<<LIST_FILES:")
-            lf_end = iteration_text.find(">>>", lf_start)
-            if lf_end != -1:
-                sub = iteration_text[lf_start:lf_end].strip()
-                files_out = execute_list_files(workspace, sub)
-                iteration_text += f"\n\n*Files in `{workspace}`:*\n```\n{files_out}\n```"
-                modified = True
+        # 4. Parse & Execute LIST_FILES
+        list_matches = re.findall(r"<<<LIST_FILES:\s*(.*?)\s*>>>", iteration_text)
+        for sub_dir in list_matches:
+            files_out = execute_list_files(workspace, sub_dir)
+            iteration_text += f"\n\n*Files in `{workspace}`:*\n```\n{files_out}\n```"
 
         # Clean tags from final message display
         clean_display = (
-            iteration_text
+            re.sub(r"<<<WRITE_FILE:.*?>>>.*?<<<END_WRITE>>>", "[Code written to file]", iteration_text, flags=re.DOTALL)
             .replace("<<<END_WRITE>>>", "")
         )
 
         session["chat_history"].append({"role": "assistant", "text": clean_display})
 
-        await processing_msg.delete()
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+
         await send_split_message(update, clean_display)
 
     except Exception as e:
         logger.exception("Error processing agent request")
-        await processing_msg.edit_text(f"❌ Error occurred: `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
+        try:
+            await processing_msg.edit_text(f"❌ Error occurred: `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await update.effective_message.reply_text(f"❌ Error occurred: {str(e)}")
 
 
 def main():
