@@ -23,6 +23,7 @@ from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -625,7 +626,13 @@ def main():
     print(f"📁 Default Workspace: {get_default_workspace()}")
     print("=" * 60)
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    request_config = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0,
+    )
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request_config).build()
 
     # Commands
     app.add_handler(CommandHandler("start", cmd_start))
@@ -642,8 +649,8 @@ def main():
     # Messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start Polling
-    app.run_polling()
+    # Start Polling with infinite retries on network drop
+    app.run_polling(bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
