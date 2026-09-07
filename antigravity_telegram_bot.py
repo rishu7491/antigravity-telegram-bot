@@ -246,6 +246,50 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🧹 Conversation history cleared!", parse_mode=ParseMode.MARKDOWN)
 
 
+async def cmd_set_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set or update Gemini API key directly from Telegram."""
+    global GEMINI_API_KEY
+    if not context.args:
+        await update.message.reply_text(
+            "🔑 *Gemini API Key Set Karne Ke Liye:*\n\n"
+            "Format: `/set_key AIzaSy...your_gemini_api_key`\n\n"
+            "Aap apni free API key yahan se le sakte hain:\nhttps://aistudio.google.com/",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    new_key = context.args[0].strip()
+    GEMINI_API_KEY = new_key
+    # Also save to .env
+    try:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.startswith("GEMINI_API_KEY="):
+                new_lines.append(f"GEMINI_API_KEY={new_key}\n")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f"GEMINI_API_KEY={new_key}\n")
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        await update.message.reply_text(
+            "✅ *Gemini API Key successfully set and saved to .env!*\n\nAb aap Antigravity Agent ko koi bhi task de sakte hain.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await update.message.reply_text(f"✅ Gemini Key active in memory, but could not save to .env: {e}")
+
+
 # ==========================================
 # AGENT TOOL EXECUTIONS
 # ==========================================
@@ -576,6 +620,7 @@ def main():
     app.add_handler(CommandHandler("use_default", cmd_use_default))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("set_key", cmd_set_key))
     app.add_handler(CommandHandler("help", cmd_help))
 
     # Interactive Permission Callbacks
